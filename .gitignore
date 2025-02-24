@@ -17,3 +17,5 @@ dist/dvr_scan-*
 .vs_code/
 .vscode/
 .venv/
+venv/
+test_data/

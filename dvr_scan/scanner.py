@@ -20,6 +20,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, AnyStr, List, Optional, Tuple, Union
@@ -36,6 +37,8 @@ from dvr_scan.platform import HAS_TKINTER, get_filename, get_min_screen_bounds, 
 from dvr_scan.region import Point, Size, bound_point, load_regions
 from dvr_scan.subtractor import SubtractorCNT, SubtractorCudaMOG2, SubtractorMOG2
 from dvr_scan.video_joiner import VideoJoiner
+# from dvr_scan.pyav_video_joiner import VideoStreamPyAv as VideoJoiner
+
 
 if HAS_TKINTER:
     from dvr_scan.app.region_editor import RegionEditor
@@ -267,7 +270,7 @@ class MotionScanner:
         self._roi_deprecated = None
 
         # Input Video Parameters (set_video_time)
-        self._input: VideoJoiner = VideoJoiner(input_videos)  # -i/--input
+        self._input = VideoJoiner(input_videos)  # -i/--input
         self._frame_skip: int = frame_skip  # -fs/--frame-skip
         self._start_time: FrameTimecode = None  # -st/--start-time
         self._end_time: FrameTimecode = None  # -et/--end-time
@@ -291,6 +294,8 @@ class MotionScanner:
         self.set_event_params()
         self.set_thumbnail_params()
         self.set_video_time()
+
+        self._decode_time_accumulator = 0.0
 
     @property
     def framerate(self) -> float:
@@ -985,7 +990,15 @@ class MotionScanner:
                 for _ in range(self._frame_skip):
                     if self._input.read(decode=False) is None:
                         break
-                frame_bgr = self._input.read()
+
+                start_time = time.time()
+                frame_bgr = self._input.read()  # 실제 디코딩
+                end_time = time.time()
+
+                # 디코딩에 걸린 시간 누적
+                if frame_bgr is not None:
+                    self._decode_time_accumulator += (end_time - start_time)
+
                 if frame_bgr is None:
                     break
                 # self._input.position points to the time at the end of the current frame (i.e. the
@@ -1012,6 +1025,8 @@ class MotionScanner:
         finally:
             # Make sure main thread stops processing loop.
             decode_queue.put(None)
+            # 디코딩 누적 시간 로그 출력
+            logger.info(f"총 디코딩 시간: {self._decode_time_accumulator:.3f}초")
 
     def _init_video_writer(self, path: AnyStr, frame_size: Tuple[int, int]) -> cv2.VideoWriter:
         """Create a new cv2.VideoWriter using the correct framerate."""
